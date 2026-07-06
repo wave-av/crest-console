@@ -1,0 +1,31 @@
+LICENSE
+  s_157583aa3b6686::t_cd0680bdc277b0 1-201
+README.md
+  s_157583aa3b6686::t_35750a00d8ce90 1-30
+console/index.html
+  s_157583aa3b6686::t_47d5676d265518 1-54
+console/moq-player.js
+  s_157583aa3b6686::t_c6c82af719f962 1-181
+console/moq-wire-browser.js
+  s_157583aa3b6686::t_1aef2d0cd8e4f8 1-101
+console/session.js
+  s_157583aa3b6686::t_be7805f9d6887e 1-38
+package.json
+  s_157583aa3b6686::t_5386af8fba9492 1-27
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.10",
+  "base_commit_sha": "1f728faef7a35b59b4a577cc4324d821b2856cfb",
+  "prompts": {},
+  "sessions": {
+    "s_157583aa3b6686": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0800e731-23e3-40e5-abec-27e99bf7f8c7",
+        "model": "unknown"
+      },
+      "human_author": "Jake Fineman <jakefineman@gmail.com>"
+    }
+  }
+}
