@@ -1,0 +1,27 @@
+{
+  "name": "@wave/crest-console",
+  "version": "0.1.0",
+  "description": "WAVE Crest — open browser MoQ (draft-ietf-moq-transport-18) console + player. Preview any Crest ingest in a browser.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "private": false,
+  "files": [
+    "console/"
+  ],
+  "keywords": [
+    "moq",
+    "media-over-quic",
+    "webcodecs",
+    "h264",
+    "live-video",
+    "wave"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wave-av/crest-console"
+  },
+  "homepage": "https://crest.wave.online",
+  "scripts": {
+    "serve": "python3 -m http.server 8080 --directory console"
+  }
+}

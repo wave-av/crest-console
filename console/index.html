@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WAVE Crest — live console</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; background: #05070d; color: #cfe3ff; font: 14px/1.5 ui-monospace, monospace; }
+    header { padding: 12px 16px; border-bottom: 1px solid #16263f; }
+    header b { color: #39c2c9; }
+    main { display: grid; grid-template-columns: 1fr 340px; gap: 16px; padding: 16px; }
+    canvas { width: 100%; background: #000; border: 1px solid #16263f; border-radius: 6px; aspect-ratio: 16/9; }
+    #status { color: #9fb; margin: 8px 0; }
+    pre { background: #0a1120; border: 1px solid #16263f; border-radius: 6px; padding: 12px; overflow: auto; white-space: pre-wrap; word-break: break-all; }
+    .panel { background: #0a1120; border: 1px solid #16263f; border-radius: 6px; padding: 12px; }
+    .panel h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: #6f8bad; margin: 0 0 8px; }
+    input { width: 100%; box-sizing: border-box; background: #05070d; color: #cfe3ff; border: 1px solid #26405f;
+      border-radius: 5px; padding: 8px; font: inherit; margin: 4px 0 8px; }
+    button { background: #39c2c9; color: #05070d; border: 0; border-radius: 5px; padding: 8px 14px;
+      font: inherit; font-weight: 700; cursor: pointer; }
+    .hint { color: #5b7287; font-size: 12px; margin: 6px 0 0; }
+    a { color: #39c2c9; }
+  </style>
+</head>
+<body>
+  <header><b>WAVE</b> Crest · live console <span style="opacity:.6">(H.264 over MoQ draft-18 · WebCodecs)</span></header>
+  <main>
+    <div>
+      <div id="status">idle</div>
+      <canvas id="view" width="640" height="360"></canvas>
+      <p class="hint">Viewer reads <code>?ns=&amp;track=&amp;relay=</code> from the URL. Open a session (right) to
+        mint a namespace, point <code>crest-publish</code> at its <code>publishPath</code>, then this viewer plays it.
+        H.264 decode requires Chrome (proprietary codecs).</p>
+    </div>
+    <div>
+      <div class="panel">
+        <h2>Open ingest session</h2>
+        <input id="key" type="password" placeholder="WAVE API key (Bearer)" autocomplete="off" />
+        <button id="open" type="button">Open session</button>
+        <p class="hint">POSTs <code>/api/v1/crest/session</code> through the gateway. The response names the
+          MoQ <code>namespace</code>/<code>track</code> to publish + subscribe.</p>
+        <pre id="session">{}</pre>
+      </div>
+      <div class="panel" style="margin-top:12px">
+        <h2>Player stats</h2>
+        <pre id="stats">{}</pre>
+      </div>
+    </div>
+  </main>
+  <script src="./session.js" defer></script>
+  <script type="module" src="./moq-player.js"></script>
+</body>
+</html>
