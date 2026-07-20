@@ -2,8 +2,9 @@ name: foundation-gate
 
 # Adopts the wave-foundation CI baseline. Vendored/added by scripts/propagate-baseline.mjs (E5).
 on:
-  push:
   pull_request:
+  push:
+    branches: [main]
 
 jobs:
   gate:
