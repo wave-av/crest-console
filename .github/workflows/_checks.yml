@@ -1,0 +1,460 @@
+name: foundation checks
+
+# Reusable cross-project gate (the executable half of wave-foundation). Any WAVE repo runs the same
+# secret-scan + file-size gate by calling this:
+#   jobs: { gate: { uses: wave-av/wave-foundation/.github/workflows/checks.yml@v1 } }
+# One source of truth -> update here, every repo inherits it (no copying = no drift).
+on:
+  workflow_call:
+    inputs:
+      max_lines:
+        type: number
+        default: 800
+        required: false
+      enforce_claude_config:
+        # Staged rollout of the full-tree `.claude/` governance gate (job: claude-config). Default OFF
+        # so adding this job to the shared reusable does NOT break the CI of repos that still carry
+        # legacy `.claude/` debt (e.g. hardcoded /Users/ paths the diff-scoped governance gate grandfathers).
+        # A repo flips this true once its `.claude/` is scrubbed clean; the org default flips true after
+        # the fleet-wide scrub. (config-no-silent-noop: a new gate must never silently break 100 repos.)
+        type: boolean
+        default: false
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 0 # diff-scoped token-budget gate below needs merge-base history
+          persist-credentials: false
+      - name: Secret scan (fail-closed, allowlist-aware)
+        run: |
+          # Real-secret patterns. Lines tagged "pragma: allowlist secret" (e.g. test fixtures / regex
+          # definitions) are skipped — that's how a vetting module can define key-shapes without tripping.
+          HITS=$(grep -rIEn '(sk-[A-Za-z0-9]{20}|sk_(live|test)_[A-Za-z0-9]{20}|npm_[A-Za-z0-9]{30}|sbp_[a-f0-9]{40}|github_pat_[A-Za-z0-9_]{40}|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]{30}|AIzaSy[A-Za-z0-9_-]{20}|xai-[A-Za-z0-9]{40}|xoxb-[A-Za-z0-9-]+|-----BEGIN [A-Z ]*PRIVATE KEY)' \
+              --exclude-dir=.git --exclude-dir=node_modules --exclude-dir=dist . | grep -v 'allowlist secret' \
+              | { [ -f .github/.secret-allowlist ] && grep -vFf .github/.secret-allowlist || cat; } || true)
+          if [ -n "$HITS" ]; then echo "::error::secret-like pattern found — do not commit credentials"; echo "$HITS"; exit 1; fi
+          echo "secret-scan clean"
+      - name: File-size gate
+        env:
+          MAX: ${{ inputs.max_lines }}
+        run: |
+          # rules/file-size-limits.md is LAW: a size gate is an architecture signal — DECOMPOSE, never
+          # trim context to pass it. Vendored / harvested material under staging/ is exempt BY PATH (a
+          # path rule, not a hand-maintained list); the .filesize-allowlist remains only for a rare,
+          # auditable first-party exception. MAX defaults to 800 (the first-party cap).
+          fail=0
+          while IFS= read -r f; do
+            case "$f" in staging/*) continue ;; esac                            # vendored harvest — exempt by PATH
+            grep -qxF "$f" .github/.filesize-allowlist 2>/dev/null && continue   # rare, auditable first-party exception
+            n=$(wc -l < "$f")
+            if [ "$n" -gt "$MAX" ]; then echo "::error::$f has $n lines (> $MAX) — DECOMPOSE: extract a cohesive module/stage; do NOT trim context to fit (rules/file-size-limits.md is LAW)."; fail=1; fi
+          done < <(git ls-files '*.ts' '*.tsx' '*.js' '*.py' | grep -vE '\.(types|d)\.ts$')
+          if [ "$fail" = 0 ]; then echo "file-size gate passed (all <= $MAX lines; staging/ vendored exempt by path)"; fi
+          exit "$fail"
+
+      - name: Token-budget gate (ratchet, diff-scoped)
+        env:
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          MERGE_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          PUSH_BEFORE_SHA: ${{ github.event.before }}
+        run: |
+          # RATCHET (was shadow-before-enforce; hardened to blocking 2026-07-08 after a clean fleet survey).
+          # Complements the line gate on the axis that matters for agent context — TOKENS. Lines can be tiny
+          # while tokens are huge (a base64 blob is 1 line / 90k tokens), so a line cap is blind to the
+          # embedded-asset bloat a token gate catches. Byte-proxy for BPE tokens (BYTES/3.6; calibrated median
+          # 3.72 on a 432-file first-party corpus) keeps this stdlib-only. 21600 bytes ≈ 6000 tokens.
+          #
+          # DIFF-SCOPED (2026-07-08): evaluates ONLY files introduced/changed in this PR/push — mirrors
+          # governance-enforce.yml's @wave-av/governance `--changed <base>` model. BASE is derived the same
+          # way (PR base sha / merge-queue base sha / push before-sha), narrowed to the merge-base with HEAD
+          # (shell-check-changed.sh's pattern), with an empty-tree fallback for an indeterminate base so a
+          # first-push/force-push never silently skips commits. This auto-grandfathers every pre-existing
+          # oversized file fleet-wide with NO per-repo baseline seed required — a file nobody touched in this
+          # diff cannot fail the gate, full stop.
+          #
+          # The .token-budget-baseline growth-ratchet still composes on top, WITHIN the diff: a touched file
+          # that was already baselined may not GROW past its baseline; a touched file with no baseline entry
+          # over cap is a NEW violation. Untouched baselined (or unbaselined-but-oversized) files are simply
+          # out of scope — that's the whole point of grandfathering by diff instead of by baseline file.
+          # Exemptions (never authored context an agent must hold): staging/, dist/ + build/ output, *.min.js,
+          # files marked AUTO-GENERATED on line 1, and the shared .filesize-allowlist.
+          #
+          # SELF-CONTAINED (2026-07-09): the logic is INLINED here — a consumer of this reusable workflow
+          # needs NOTHING vendored, exactly like the secret-scan and file-size gates above. Previously this
+          # step ran `bash scripts/token-budget-check-changed.sh` from the CALLER's checkout, which required
+          # every spoke to vendor that script; when the moving @v1 tag advanced to this step, no consumer had
+          # it and `gate / checks` failed exit 127 fleet-wide. foundation cannot be checked out from a
+          # consumer's CI (private repo, caller GITHUB_TOKEN lacks read), so inlining — not a cross-repo
+          # checkout — is the correct self-contained fix. scripts/token-budget-check-changed.sh remains the
+          # local/tested reference (scripts/token-budget-check-changed.test.mjs drills it); keep this inlined
+          # copy behaviorally in sync with it (same comment-enforced norm as gen-token-budget-baseline.sh).
+          BYTE_MAX=21600
+          BASELINE=".github/.token-budget-baseline"
+          BASE_REF="${PR_BASE_SHA:-${MERGE_BASE_SHA:-$PUSH_BEFORE_SHA}}"
+          if [ -z "$BASE_REF" ] || [ "$BASE_REF" = "0000000000000000000000000000000000000000" ]; then
+            BASE=$(git hash-object -t tree /dev/null)
+            echo "::warning::indeterminate diff base; scanning full tree (empty-tree base) so no commit is skipped"
+          else
+            mb="$(git merge-base "$BASE_REF" HEAD 2>/dev/null || true)"
+            BASE="${mb:-$BASE_REF}"
+          fi
+          echo "token-budget gate: diffing against $BASE"
+          fail=0
+          count=0
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            [ -f "$f" ] || continue # skip deletions — nothing to size
+            case "$f" in
+              staging/* | dist/* | */dist/* | build/* | */build/* | *.min.js) continue ;; # vendored / generated build output — exempt by PATH
+            esac
+            grep -qxF "$f" .github/.filesize-allowlist 2>/dev/null && continue # same allowlist as the line gate
+            IFS= read -r first <"$f" || true                                   # line 1 only
+            case "$first" in *AUTO-GENERATED*) continue ;; esac                # generated embedded-asset source
+            b=$(wc -c <"$f")
+            [ "$b" -gt "$BYTE_MAX" ] || continue
+            count=$((count + 1))
+            base=$(awk -F'\t' -v p="$f" '$1==p {print $2+0}' "$BASELINE" 2>/dev/null) # +0 coerces to int
+            tok=$((b * 10 / 36))
+            if [ -n "$base" ] && [ "$b" -le "$base" ]; then
+              echo "::warning::$f is $b bytes (~$tok tokens > ~6000) — grandfathered (baseline $base). DECOMPOSE to strike it from $BASELINE."
+            elif [ -n "$base" ]; then
+              echo "::error::$f GREW to $b bytes (~$tok tokens, > baseline $base) — a grandfathered oversized file may not grow. DECOMPOSE (rules/file-size-limits.md is LAW); never trim context to fit."
+              fail=1
+            else
+              echo "::error::$f is $b bytes (~$tok tokens > ~6000) — NEW oversized file in this diff. DECOMPOSE or extract embedded assets; do NOT trim context to fit."
+              fail=1
+            fi
+          done < <(git diff --name-only --diff-filter=ACMR "$BASE"...HEAD -- '*.ts' '*.tsx' '*.js' '*.mjs' '*.py' | grep -vE '\.(types|d)\.ts$')
+          if [ "$fail" = 0 ]; then echo "token-budget ratchet passed (diff-scoped: $count over-cap file(s) in the changed set, 0 new/grown)"; fi
+          exit "$fail"
+  claude-config:
+    if: ${{ inputs.enforce_claude_config }}   # staged rollout — opt-in until a repo's .claude/ is scrubbed clean
+    # Full-tree governance for project-level `.claude/` agent config (config-governed-like-prod LAW):
+    # forces committed agent config to ZERO hardcoded home paths + ZERO materialized secrets across the
+    # WHOLE tracked `.claude/**` tree. This is the gap the other two gates leave: the whole-repo Secret
+    # scan (above) has no path rule, and @wave-av/governance (governance-enforce.yml) checks paths only on
+    # the DIFF (it grandfathers legacy debt). No-op in a repo with no tracked `.claude/`. Inlined so
+    # consumers need nothing from this repo — mirrors wave-foundation/scripts/check-claude-config.sh; keep
+    # the two in sync.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Governed .claude/ config gate (full-tree, fail-closed)
+        run: |
+          # Secret matches are REDACTED (line numbers only) so this log can never leak a credential.
+          ALLOW=".github/.claude-governance-allow"   # exact tracked paths to exempt; fail-OPEN if absent
+          SECRET_RE='(sk-[A-Za-z0-9]{20}|sk_(live|test)_[A-Za-z0-9]{20}|npm_[A-Za-z0-9]{30}|sbp_[a-f0-9]{40}|github_pat_[A-Za-z0-9_]{40}|ghp_[A-Za-z0-9]{30}|gho_[A-Za-z0-9]{30}|ghs_[A-Za-z0-9]{30}|AKIA[0-9A-Z]{16}|ASIA[0-9A-Z]{16}|AIzaSy[A-Za-z0-9_-]{20}|xai-[A-Za-z0-9]{40}|xoxb-[A-Za-z0-9-]+|re_[A-Za-z0-9_]{20}|-----BEGIN [A-Z ]*PRIVATE KEY)'
+          PATH_RE='(/Users/[A-Za-z0-9._-]+/|/home/[A-Za-z0-9._-]+/)'   # use $HOME / ~ (no-hardcoded-paths LAW)
+          allowed() { [ -f "$ALLOW" ] && grep -qxF "$1" "$ALLOW" 2>/dev/null; }
+          fail=0; scanned=0
+          while IFS= read -r -d '' f; do
+            case "$f" in .claude/*|*/.claude/*) ;; *) continue ;; esac
+            case "$f" in staging/*) continue ;; esac   # vendored/harvested external material — exempt by PATH
+            allowed "$f" && continue
+            [ -f "$f" ] || continue
+            scanned=$((scanned + 1))
+            sl=$(grep -nIE "$SECRET_RE" -- "$f" 2>/dev/null | cut -d: -f1 | paste -sd, - || true)
+            if [ -n "$sl" ]; then echo "::error::claude-config: $f — secret-like credential at line(s) $sl (REDACTED); never materialize a secret in agent config (config-governed-like-prod LAW)."; fail=1; fi
+            ph=$(grep -nIE "$PATH_RE" -- "$f" 2>/dev/null | sed -E "s/$SECRET_RE/[REDACTED-SECRET]/g" || true)  # mask any secret on a dual-match line
+            if [ -n "$ph" ]; then echo "::error::claude-config: $f — hardcoded absolute home path (use \$HOME or ~):"; printf '%s\n' "$ph" | sed 's/^/    /'; fail=1; fi
+          done < <(git ls-files -z)
+          if [ "$fail" = 0 ]; then echo "claude-config gate: clean ($scanned tracked .claude/ file(s); 0 secrets, 0 hardcoded paths)"; fi
+          exit "$fail"
+  skill-validate:
+    # Validates SKILL.md frontmatter in the CALLING repo. Auto-discovers any *SKILL.md; no-op if
+    # the repo has none. Inlined (not a shared script) so consumers need nothing from this repo —
+    # mirrors wave-foundation/scripts/validate-skills.py; keep the two in sync.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.14"
+      - run: pip install pyyaml
+      - name: Skill frontmatter gate
+        run: |
+          python3 - <<'PY'
+          import sys, os, re, subprocess
+          import yaml
+          allf = subprocess.run(["git","ls-files","*SKILL.md"], capture_output=True, text=True).stdout.splitlines()
+          # Only validate invocable skills; skip nested reference/vendored SKILL.md.
+          skip = ("/references/", "/_external/", "/_consolidated", "/_archived", "/node_modules/", "/dist/")
+          files = [f for f in allf if not any(s in "/" + f for s in skip)]
+          if not files:
+              print("no SKILL.md in repo — skill gate is a no-op"); sys.exit(0)
+          errs = []
+          for p in files:
+              d = os.path.basename(os.path.dirname(p))
+              t = open(p, encoding="utf-8", errors="replace").read()
+              m = re.match(r"^---\s*\n(.*?)\n---", t, re.S)
+              if not m:
+                  errs.append(f"{p}: no frontmatter block"); continue
+              fm = m.group(1)
+              seen, dup = set(), set()
+              for line in fm.split("\n"):
+                  k = re.match(r"^([A-Za-z_][\w-]*):", line)
+                  if k: (dup if k.group(1) in seen else seen).add(k.group(1))
+              if dup: errs.append(f"{p}: duplicate frontmatter keys: {', '.join(sorted(dup))}")
+              try:
+                  data = yaml.safe_load(fm) or {}
+              except yaml.YAMLError as e:
+                  errs.append(f"{p}: invalid YAML frontmatter: {e}"); continue
+              if not isinstance(data, dict):
+                  errs.append(f"{p}: frontmatter is not a mapping"); continue
+              if data.get("name") != d:
+                  errs.append(f"{p}: name '{data.get('name')}' != directory '{d}'")
+              if not str(data.get("description") or "").strip():
+                  errs.append(f"{p}: missing/empty description")
+              for key in ("allowed-tools", "hooks"):
+                  if key in data:
+                      v = data[key]
+                      if v is None or (isinstance(v, (list, dict, str)) and len(v) == 0):
+                          errs.append(f"{p}: '{key}' present but EMPTY")
+          for e in errs:
+              print(f"::error::{e}")
+          print(f"validated {len(files)} skills — {len(errs)} errors")
+          sys.exit(1 if errs else 0)
+          PY
+  claude-api-shape:
+    # Claude-API request-shape gate — every consuming repo inherits this via foundation-gate.yml,
+    # so the temperature→Opus-400 bug class (plus date-suffixed model IDs, budget_tokens on Opus
+    # 4.7/4.8, effort on Haiku 4.5, deprecated output_format) is caught in CI everywhere with zero
+    # per-spoke wiring.
+    #
+    # SINGLE SOURCE OF TRUTH, no drift: it runs the canonical script the repo VENDORS via consume.sh
+    # at .foundation/frameworks/claude-api/lint-request-shape.sh — the exact same script devs hit at
+    # commit time. No-op (not a failure) if the repo hasn't vendored it yet. BLOCKING as of 2026-06-04 —
+    # flipped from advisory after a clean soak (all 18 active spokes green on this gate). A repo that
+    # hasn't vendored the linter still no-ops; one that vendored it must keep a valid Opus-4.x request shape.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Claude-API request-shape gate (vendored script)
+        run: |
+          LINT=.foundation/frameworks/claude-api/lint-request-shape.sh
+          if [ -f "$LINT" ]; then
+            echo "running vendored Claude-API shape linter"
+            bash "$LINT"
+          else
+            echo "::notice::no vendored Claude-API linter ($LINT) — run consume.sh to adopt the standard. Skipping."
+          fi
+
+  claude-api-cache:
+    # Prompt-caching gate — inherited by every consuming spoke via foundation-gate.yml, so the
+    # "stable system prefix served uncached at full input price" class (the wave.online workspace had
+    # ZERO cache use: 77/80 call sites missing cache_control) is caught everywhere with zero per-spoke
+    # wiring. Especially load-bearing as WSC is decomposed into per-product spoke repos.
+    #
+    # SINGLE SOURCE OF TRUTH: runs the canonical script the repo VENDORS at
+    # .foundation/frameworks/claude-api/lint-cache-control.sh — the same script devs hit at commit time.
+    # No-op if not vendored yet. BLOCKING as of 2026-06-04 — flipped from advisory after a clean soak
+    # (all 18 active spokes green). Every vendored Claude request with a system prefix must cache it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Claude-API prompt-caching gate (vendored script)
+        run: |
+          LINT=.foundation/frameworks/claude-api/lint-cache-control.sh
+          if [ -f "$LINT" ]; then
+            echo "running vendored Claude-API cache-control linter"
+            bash "$LINT"
+          else
+            echo "::notice::no vendored Claude-API cache linter ($LINT) — run consume.sh to adopt the standard. Skipping."
+          fi
+
+  verify-routes:
+    # URL convention enforcement (docs/conventions/url-naming.md).
+    # No-op for repos with no wrangler.toml. Scans `pattern = "..."` and `routes = [...]` lines for
+    # banned patterns: *-edge.wave.online, *.production.wave.online, wave-*.wave.online,
+    # *-staging.wave.online (use sub-subdomain instead). Worker-only fallbacks (*.workers.dev) are
+    # ALLOWED with a warning so dev/preview routes don't trip the gate.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: URL convention gate
+        # Reads only file paths from `git ls-files` (repo-controlled, trusted) and host strings
+        # extracted via a CONSTRAINED regex from wrangler.toml (PR-controlled). The regex
+        # `"[a-zA-Z0-9._-]+\.wave\.online[^"]*"` bounds matches between double-quotes; `cut -d/ -f1`
+        # then keeps only the hostname-shaped prefix. Hostnames cannot contain shell metacharacters
+        # under that character class, so the case-glob match is injection-safe. No `${{ github.* }}`
+        # interpolation is used anywhere in this step (only shell vars + `-F` literal grep). Files
+        # are iterated via `while read` to handle paths with spaces safely.
+        run: |
+          fail=0
+          any=0
+          while IFS= read -r f; do
+            any=1
+            # Extract host portion (everything before the first /) from `pattern = "host/..."` lines.
+            # Handles both inline-string `pattern = "..."` and `routes = ["a.wave.online/*", ...]`.
+            while IFS= read -r h; do
+              [ -z "$h" ] && continue
+              case "$h" in
+                *-edge.wave.online)
+                  echo "::error file=$f::URL '$h' uses banned -edge suffix (see docs/conventions/url-naming.md)"; fail=1 ;;
+                *.production.wave.online)
+                  echo "::error file=$f::URL '$h' uses banned .production. (production is the default)"; fail=1 ;;
+                wave-*.wave.online)
+                  echo "::error file=$f::URL '$h' uses banned wave- prefix (redundant on wave.online)"; fail=1 ;;
+                *-staging.wave.online)
+                  echo "::error file=$f::URL '$h' uses banned -staging suffix (use <proto>.staging.wave.online sub-subdomain)"; fail=1 ;;
+                *.staging.wave.online)
+                  echo "::notice file=$f::staging URL $h ✓" ;;
+                *.dev.wave.online)
+                  echo "::notice file=$f::dev URL $h ✓" ;;
+                *.wave.online)
+                  echo "::notice file=$f::prod URL $h ✓" ;;
+                *)
+                  echo "::warning file=$f::URL $h unrecognized — verify against docs/conventions/url-naming.md" ;;
+              esac
+            done < <(grep -oE '"[a-zA-Z0-9._-]+\.wave\.online[^"]*"' "$f" 2>/dev/null | tr -d '"' | cut -d/ -f1 | sort -u)
+          done < <(git ls-files '*wrangler.toml' 'wrangler*.toml')
+          if [ "$any" = 0 ]; then echo "no wrangler.toml — verify-routes is a no-op"; exit 0; fi
+          if [ "$fail" = 0 ]; then echo "verify-routes passed"; fi
+          exit "$fail"
+
+  voice:
+    # WAVE voice gate (frameworks/copywriting/voice-and-tone.md §human⇄agent taxonomy): user-facing
+    # marketing/docs copy says "people" / second person, NOT "humans" (othering). Scans only the
+    # user-facing files CHANGED in this PR (.ts/.tsx/.md/.mdx, excluding tests), so it gates NEW copy
+    # and never retroactively fails unswept files. ALLOWED: the "human-in-the-loop" term-of-art (HITL —
+    # an approval STEP, like "human review"; covers the "no human in the loop" autonomy idiom too); the GDPR
+    # / EU-AI-Act legal terms "human review"/"human oversight"; "human-readable"; typography words;
+    # identifiers/const/id-slugs; and code comments. No `${{ github.* }}` interpolation (shell only).
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Voice gate (people, not humans)
+        run: |
+          base=$(git remote show origin 2>/dev/null | sed -n 's/.*HEAD branch: //p')
+          base="origin/${base:-main}"
+          git fetch origin --quiet 2>/dev/null || true
+          fail=0; any=0
+          is_target() { case "$1" in
+            *.test.*|*.spec.*) return 1 ;;
+            *frameworks/copywriting/*|*voice-and-tone*) return 1 ;;
+            *CHANGELOG.md) return 1 ;;   # git-cliff-generated from commit history — not authored copy
+            *.tsx|*.ts|*.md|*.mdx) return 0 ;;
+            *) return 1 ;;
+          esac; }
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            [ -f "$f" ] || continue
+            is_target "$f" || continue
+            any=1
+            if grep -niE '\bhumans?\b' "$f" \
+                 | grep -vE '^[0-9]+:[[:space:]]*(//|\*|#|/\*|<!--)' \
+                 | grep -qivE 'human.?in.?the.?loop|human review|human oversight|human-read|humanis|humaniz|HUMANS?_|_HUMANS?|-humans?-|"human"|\.human\b'; then
+              echo "::error file=$f::'human/humans' in marketing copy — use 'people' or second person (frameworks/copywriting/voice-and-tone.md)"
+              fail=1
+            fi
+          done < <(git diff --name-only --diff-filter=ACM "${base}...HEAD" 2>/dev/null)
+          if [ "$any" = 0 ]; then echo "no changed user-facing files — voice gate is a no-op"; exit 0; fi
+          if [ "$fail" = 0 ]; then echo "voice gate passed"; fi
+          exit "$fail"
+
+  billing-contract:
+    # Billing & Settlement contract gate (frameworks/billing). Validates every billing.config.yaml against
+    # billing-config.schema.json + the pinned invariants — above all the CENTS INVARIANT (passthrough must be
+    # "100"), the 100x-under-bill class. Schema-driven (validate-billing.py reads the consts FROM the schema),
+    # so it can't disagree with the contract. No-op for repos without a billing.config.yaml. Advisory on
+    # rollout (continue-on-error) so a new gate can't break every spoke at once; harden to blocking after soak.
+    # The commit-time twin (registry gate) is the documented follow-up in frameworks/gates/registry.yaml.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with: { python-version: "3.14" }
+      - name: Billing & Settlement contract gate
+        run: |
+          python3 -m pip install --quiet pyyaml
+          # Foundation runs its OWN canonical validator; spokes vendor it via consume.sh. No-op without a config.
+          if [ -f frameworks/billing/validate-billing.py ]; then
+            python3 frameworks/billing/validate-billing.py
+          else
+            echo "::notice::no frameworks/billing/validate-billing.py — run consume.sh to adopt the billing contract. Skipping."
+          fi
+
+  meter-registry:
+    # Canonical-meter-registry gate (frameworks/pricing). Enforces, against the single source of record
+    # meters.json: (1) MARGIN-SAFETY — every list_price_usd >= cogs_usd (a unit is never sold below the
+    # dearest covered-backend cost; the money guard), and (2) SINGLE-SOURCE — the three duplicated meter
+    # enums (pricing.schema.json meter + topology_meters, billing-config.schema.json name) equal the registry
+    # (kills the storage_gb-vs-wave_storage_gb / voice_minutes-vs-voice_synthesis_minutes drift class).
+    # Schema-driven (reads the enums, never hardcodes the list). Advisory on rollout (continue-on-error) so a
+    # new gate can't break every spoke at once; harden to blocking after soak.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with: { python-version: "3.14" }
+      - name: Canonical meter-registry gate
+        run: |
+          python3 -m pip install --quiet pyyaml
+          if [ -f frameworks/pricing/validate-meters.py ]; then
+            python3 frameworks/pricing/validate-meters.py
+          else
+            echo "::notice::no frameworks/pricing/validate-meters.py — skipping the meter-registry gate."
+          fi
+
+  # ── SCA: dependency review (advisory) ───────────────────────────────────────
+  # Software-composition analysis on PRs: flags newly-introduced dependencies with known
+  # vulnerabilities or disallowed licenses, by diffing the dependency graph (base ↔ head). Inherited
+  # org-wide via this reusable gate (@v1) — every consumer gets SCA on its PRs with no per-repo wiring.
+  #
+  # Deliberately ADVISORY (not a merge-blocker) for now: it only runs on pull_request (the action needs
+  # PR base/head to diff). Both job- AND step-level `continue-on-error: true` are required to keep the
+  # gate from blocking spokes that lack GitHub Advanced Security ("Dependency review is not supported
+  # on this repository"). Job-level alone only stops the workflow from failing — the check-run API
+  # still reports the step conclusion as FAILURE. Step-level changes the step's conclusion to SUCCESS,
+  # which is what required-status-check protection actually reads. Promote per-repo by turning the
+  # check into a required check only on spokes whose graph is on and signal is clean.
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - name: Dependency review (vulns + licenses)
+        continue-on-error: true
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
+        with:
+          fail-on-severity: high
+          comment-summary-in-pr: on-failure
