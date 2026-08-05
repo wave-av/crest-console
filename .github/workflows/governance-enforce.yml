@@ -52,7 +52,10 @@ jobs:
           PUSH_BEFORE_SHA: ${{ github.event.before }}
         run: |
           BASE="${PR_BASE_SHA:-$PUSH_BEFORE_SHA}"
-          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ]; then
+          # Fall back when BASE is empty, all-zero (new branch), or unreachable in the
+          # checkout (force-push / branch reset makes `github.event.before` point at a
+          # commit that no longer exists locally).
+          if [ -z "$BASE" ] || [ "$BASE" = "0000000000000000000000000000000000000000" ] || ! git cat-file -e "$BASE^{commit}" 2>/dev/null; then
             BASE=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
           fi
           echo "diffing against $BASE"
