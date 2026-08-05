@@ -25,8 +25,11 @@ permissions:
   packages: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # PR runs are superseded per-ref; push runs get a unique group so a later push
+  # can never cancel an earlier push's scan (each push run only diffs its own
+  # before..HEAD range, so a canceled push's commits would escape the gate).
+  group: ${{ github.workflow }}-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   enforce:
