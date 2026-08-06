@@ -59,6 +59,15 @@ expect 1 'operator home path' \
   'Repro: run it from /Users/someoperator/Documents/notes and it fails.'  # enforce-ignore (fixture)
 expect 1 'internal-only marker' \
   'Attaching the internal-only rollout plan for context.'
+# Regression: the marker rule matches prose, and prose gets capitalized. The rule
+# was once case-sensitive, so "Internal-only" and a sentence-initial "Do not
+# share …" — the COMMON phrasing — sailed through while lowercase blocked.
+expect 1 'internal-only marker, capitalized' \
+  'Attaching the Internal-only rollout plan for context.'
+expect 1 'do-not-share marker at sentence start' \
+  'Do not share this outside the team.'
+expect 1 'internal-only marker, all caps' \
+  'INTERNAL-ONLY: rollout plan attached.'
 # Assembled at run time rather than written as a literal: a fixture that LOOKS like
 # a live AWS key trips this repo's own pre-commit secret scanners (it did, on the
 # first draft). Splitting the prefix keeps the fixture exercising the real regex
