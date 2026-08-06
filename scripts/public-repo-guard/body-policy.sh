@@ -144,8 +144,14 @@ if [[ -n "${GUARD_PRIVATE_REPOS:-}" ]]; then
     # scoped to the repo NAMES with (?i:…) — a leading (?i) would spill over the
     # whole pattern and lowercase OPS_DETAIL too, so everyday prose like "api_key"
     # near a repo name would block. OPS_DETAIL requires SCREAMING_CASE on purpose.
+    #
+    # No \b before OPS_DETAIL — deliberately, in BOTH orders. Underscore is a word
+    # character, so in WAVE_API_TOKEN the only \b sits before the W, where
+    # [A-Z][A-Z0-9]* cannot reach the required _TOKEN; a \b-anchored OPS_DETAIL
+    # silently missed every multi-underscore credential name in the name-then-
+    # detail order. Starting mid-token (…API_TOKEN) is exactly what we want.
     check BLOCK private-repo-ops \
-      "\\b(?i:${_ALT})\\b[^\\n]{0,140}?\\b${OPS_DETAIL}|${OPS_DETAIL}[^\\n]{0,140}?\\b(?i:${_ALT})\\b" \
+      "\\b(?i:${_ALT})\\b[^\\n]{0,140}?${OPS_DETAIL}|${OPS_DETAIL}[^\\n]{0,140}?\\b(?i:${_ALT})\\b" \
       'A private WAVE repo named alongside internal operational detail (credential name, secret binding, or secret count) — the wiring topology is not public'
   fi
 fi

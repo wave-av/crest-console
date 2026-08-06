@@ -46,6 +46,11 @@ expect 1 'private repo + credential name' \
   'Flip is live: FIXTURE_LEASE_SECRET is bound on fixture-repo-alpha now.'
 expect 1 'private repo + credential name, reverse order' \
   'The FIXTURE_JOIN_SECRET was added; fixture-repo-bravo picks it up on deploy.'
+# Regression: a \b once anchored the credential-name pattern, and underscore is a
+# word character — so a MULTI-underscore name AFTER the repo name never matched
+# (the only \b sits before a prefix that cannot reach the _TOKEN suffix).
+expect 1 'repo first, multi-underscore credential name after' \
+  'fixture-repo-alpha stores the FIXTURE_API_TOKEN for settlement calls.'
 expect 1 'private repo + secret count' \
   'fixture-repo-alpha went from 74 secrets to 75 after this change.'
 expect 1 'private repo + service binding' \
@@ -86,8 +91,11 @@ expect 0 'lowercase api_key near a private repo is prose, not topology' \
   'fixture-repo-alpha needs the api_key rotated before Friday.'
 expect 0 'public runner path is not an operator path' \
   'CI checks out to /home/runner/work/repo/repo before the scan runs.'  # enforce-ignore (fixture)
+# This body WOULD trip private-repo-ops (configured repo name next to
+# SECRET_TOKEN) — only the about-the-control allowlist lets it pass, so this
+# fixture fails if that allowlist is ever deleted or its rule scoping breaks.
 expect 0 'talking about the control' \
-  'body-policy blocks a private repo named next to a SECRET_TOKEN; that is intended.'
+  'body-policy blocks fixture-repo-alpha named next to a SECRET_TOKEN; that is intended.'
 expect 0 'explicit guard:allow with a reason' \
   'Example for the docs: fixture-repo-alpha holds EXAMPLE_SECRET — guard:allow documented-example'
 expect 0 'ordinary clean body' \
