@@ -25,6 +25,10 @@ set -uo pipefail
 FILE="${1:-}"
 [[ -n "$FILE" && -f "$FILE" ]] || { echo "::error::body-policy: usage: body-policy.sh <file>"; exit 2; }
 command -v rg >/dev/null 2>&1 || { echo "::error::body-policy: ripgrep (rg) required"; exit 2; }
+# Every rule below uses -P (PCRE2) for lookarounds; a build without it makes rg
+# exit 2 on the first rule and every run "fails closed" with a message that blames
+# the rule rather than the build. Preflight it once with a diagnosis instead.
+rg --pcre2-version >/dev/null 2>&1 || { echo "::error::body-policy: this ripgrep build lacks PCRE2 (-P) support, which every rule here needs — install a PCRE2-enabled build (the apt/brew packages are; 'cargo install ripgrep' needs --features pcre2)"; exit 2; }
 
 VIOLATIONS=0
 
@@ -32,7 +36,15 @@ VIOLATIONS=0
 # the gate blocks its own pull requests and every security discussion — the
 # self-referential trap that gets a gate switched off. Ported verbatim in intent
 # from the client-side gate's allowlist, which was built for exactly this.
+#
+# Scope: NARRATIVE rules only (internal-marker, private-repo-ops). Those are the
+# rules a security discussion trips by describing them. It must never apply to the
+# credential-format or infrastructure rules: "per SECURITY.md we rotated AKIA…"
+# is a live key on a line that happens to mention the control, and a leaked key is
+# exactly as leaked next to the word SECURITY.md as anywhere else. For those rules
+# the only exemption is the explicit, visible `guard:allow <reason>`.
 ABOUT_THE_CONTROL='(public-repo-guard|body-policy|content-policy|public-github-write-gate|\bNDA\s+(gate|guard|policy|denylist|sweep|scan|hook)\b|\bno\s+NDA\b|responsib\w*\s+disclos|SECURITY\.md)'
+ABOUT_THE_CONTROL_RULES='internal-marker|private-repo-ops'
 
 # check <BLOCK|WARN> <name> <regex> <why>
 check() {
@@ -50,9 +62,12 @@ check() {
   # silently errors out locally while working on GNU/CI — the gate would then
   # disagree with itself depending on where it ran. rg is already required above.
   local matches
-  matches="$(printf '%s' "$raw" \
-    | rg -vN -- 'guard:allow[[:space:]]+[^[:space:]]' \
-    | rg -vNiP -- "$ABOUT_THE_CONTROL" || true)"
+  matches="$(printf '%s' "$raw" | rg -vN -- 'guard:allow[[:space:]]+[^[:space:]]' || true)"
+  # The about-the-control allowlist applies ONLY to the narrative rules — see its
+  # definition above for why it must never exempt a credential-format hit.
+  if [[ "$name" =~ ^(${ABOUT_THE_CONTROL_RULES})$ ]]; then
+    matches="$(printf '%s' "$matches" | rg -vNiP -- "$ABOUT_THE_CONTROL" || true)"
+  fi
   [[ -z "$matches" ]] && return 0
   local count; count="$(printf '%s\n' "$matches" | grep -c '')"
   # Print the LINE NUMBER only — never the matched text. This annotation is itself
@@ -125,9 +140,12 @@ if [[ -n "${GUARD_PRIVATE_REPOS:-}" ]]; then
     _ALT="${_ALT:+$_ALT|}${_esc}"
   done
   if [[ -n "$_ALT" ]]; then
-    # Both orders: name-then-detail and detail-then-name.
+    # Both orders: name-then-detail and detail-then-name. Case-insensitivity is
+    # scoped to the repo NAMES with (?i:…) — a leading (?i) would spill over the
+    # whole pattern and lowercase OPS_DETAIL too, so everyday prose like "api_key"
+    # near a repo name would block. OPS_DETAIL requires SCREAMING_CASE on purpose.
     check BLOCK private-repo-ops \
-      "(?i)\\b(?:${_ALT})\\b[^\\n]{0,140}?\\b${OPS_DETAIL}|${OPS_DETAIL}[^\\n]{0,140}?\\b(?:${_ALT})\\b" \
+      "\\b(?i:${_ALT})\\b[^\\n]{0,140}?\\b${OPS_DETAIL}|${OPS_DETAIL}[^\\n]{0,140}?\\b(?i:${_ALT})\\b" \
       'A private WAVE repo named alongside internal operational detail (credential name, secret binding, or secret count) — the wiring topology is not public'
   fi
 fi

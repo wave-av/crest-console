@@ -57,8 +57,16 @@ expect 1 'internal-only marker' \
 AKID_FIXTURE="AKI""A1234567890ABCDEF"
 expect 1 'AWS access key id' \
   "The failing job had ${AKID_FIXTURE} configured."
+# Regression: the about-the-control allowlist must never exempt a credential rule.
+# A key rotated "per SECURITY.md" is exactly as leaked as one pasted anywhere else.
+expect 1 'AWS key on a line that mentions the control still blocks' \
+  "Per SECURITY.md we rotated ${AKID_FIXTURE} this morning."
 expect 1 'internal tailscale IP' \
   'It resolves to 100.71.4.19 from inside the fleet.'
+# Regression: case-insensitivity is scoped to the repo NAMES, so a differently
+# cased name must still pair with SCREAMING_CASE detail and block.
+expect 1 'private repo name matches case-insensitively' \
+  'Wave-Gateway went from 74 secrets to 75 after this change.'
 
 # --- must PASS (precision — these keep the gate deployable) -------------------
 expect 0 'bare private-repo cross-reference' \
@@ -67,6 +75,11 @@ expect 0 'two private repos, no operational detail' \
   'Both wave-gateway and wave-transports will need a follow-up for this.'
 expect 0 'credential NAME with no private repo nearby' \
   'The handler now reads SOME_API_TOKEN from the environment instead of a literal.'
+# Regression: a leading (?i) once lowercased the whole proximity pattern, so
+# ordinary prose like "api_key" near a repo name blocked. OPS_DETAIL requires
+# SCREAMING_CASE; lowercase words are conversation, not wiring topology.
+expect 0 'lowercase api_key near a private repo is prose, not topology' \
+  'wave-gateway needs the api_key rotated before Friday.'
 expect 0 'public runner path is not an operator path' \
   'CI checks out to /home/runner/work/repo/repo before the scan runs.'  # enforce-ignore (fixture)
 expect 0 'talking about the control' \
