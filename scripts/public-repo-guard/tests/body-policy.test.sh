@@ -57,6 +57,10 @@ expect 1 'internal-only marker' \
 AKID_FIXTURE="AKI""A1234567890ABCDEF"
 expect 1 'AWS access key id' \
   "The failing job had ${AKID_FIXTURE} configured."
+# Rule-scoped allowlisting must not hide a credential sharing a line with control docs.
+GITHUB_PAT_FIXTURE="github_pat_""012345678901234567890123456789"
+expect 1 'credential survives control allowlist mention' \
+  "See public-repo-guard SECURITY.md before using ${GITHUB_PAT_FIXTURE}."
 expect 1 'internal tailscale IP' \
   'It resolves to 100.71.4.19 from inside the fleet.'
 

@@ -34,9 +34,16 @@ VIOLATIONS=0
 # from the client-side gate's allowlist, which was built for exactly this.
 ABOUT_THE_CONTROL='(public-repo-guard|body-policy|content-policy|public-github-write-gate|\bNDA\s+(gate|guard|policy|denylist|sweep|scan|hook)\b|\bno\s+NDA\b|responsib\w*\s+disclos|SECURITY\.md)'
 
-# check <BLOCK|WARN> <name> <regex> <why>
+# check <BLOCK|WARN> <name> <regex> <why> [allow_about_control]
+# The control-discussion allowlist is opt-in per rule. Secret and identifier rules
+# must still report a match when it shares a line with a gate-related mention.
 check() {
-  local sev="$1" name="$2" re="$3" why="$4"
+  local sev="$1" name="$2" re="$3" why="$4" allow_about_control="${5:-false}"
+
+  [[ "$allow_about_control" == true || "$allow_about_control" == false ]] || {
+    echo "::error::body-policy: internal bug — invalid allow_about_control for rule '$name'"
+    exit 2
+  }
   [[ -z "$re" ]] && { echo "::error::body-policy: internal bug — empty regex for rule '$name'"; exit 2; }
   # rg exit: 0=match, 1=no match, >=2=real error → FAIL CLOSED. A gate that passes
   # because its scanner broke is worse than no gate: it reports success.
@@ -51,8 +58,10 @@ check() {
   # disagree with itself depending on where it ran. rg is already required above.
   local matches
   matches="$(printf '%s' "$raw" \
-    | rg -vN -- 'guard:allow[[:space:]]+[^[:space:]]' \
-    | rg -vNiP -- "$ABOUT_THE_CONTROL" || true)"
+    | rg -vN -- 'guard:allow[[:space:]]+[^[:space:]]' || true)"
+  if [[ "$allow_about_control" == true ]]; then
+    matches="$(printf '%s' "$matches" | rg -vNiP -- "$ABOUT_THE_CONTROL" || true)"
+  fi
   [[ -z "$matches" ]] && return 0
   local count; count="$(printf '%s\n' "$matches" | grep -c '')"
   # Print the LINE NUMBER only — never the matched text. This annotation is itself
@@ -128,7 +137,7 @@ if [[ -n "${GUARD_PRIVATE_REPOS:-}" ]]; then
     # Both orders: name-then-detail and detail-then-name.
     check BLOCK private-repo-ops \
       "(?i)\\b(?:${_ALT})\\b[^\\n]{0,140}?\\b${OPS_DETAIL}|${OPS_DETAIL}[^\\n]{0,140}?\\b(?:${_ALT})\\b" \
-      'A private WAVE repo named alongside internal operational detail (credential name, secret binding, or secret count) — the wiring topology is not public'
+      'A private WAVE repo named alongside internal operational detail (credential name, secret binding, or secret count) — the wiring topology is not public' true
   fi
 fi
 
