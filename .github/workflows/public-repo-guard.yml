@@ -13,11 +13,13 @@ name: public-repo-guard
 # wave-av/.github must not be able to alter another repo's secret scanner). The
 # gitleaks binary is version-pinned AND SHA-256-verified before it runs.
 #
-# To install on a new repo, copy all four files together:
+# To install on a new repo, copy all five files together (the fixture suite is
+# not optional: the guard job runs it, so a repo without it goes red):
 #   .github/workflows/public-repo-guard.yml
 #   .gitleaks.toml
 #   scripts/public-repo-guard/content-policy.sh
 #   scripts/public-repo-guard/body-policy.sh
+#   scripts/public-repo-guard/tests/body-policy.test.sh
 #
 # Scan scope: the published working TREE (gitleaks --no-git), NOT git history. The
 # goal is "what is public right now is clean", so a shallow checkout is sufficient.
@@ -33,6 +35,12 @@ on:
   issues:
     types: [opened, edited]
   issue_comment:
+    types: [created, edited]
+  # Diff review comments and review bodies are NOT issue_comment events — without
+  # these two triggers they were the one public text surface nothing scanned.
+  pull_request_review:
+    types: [submitted, edited]
+  pull_request_review_comment:
     types: [created, edited]
   push:
     branches: [main, master]
@@ -112,16 +120,20 @@ jobs:
   # can stop that class before publication.
   body-guard:
     name: Body content policy
-    if: github.event_name == 'pull_request' || github.event_name == 'issues' || github.event_name == 'issue_comment'
+    if: >-
+      github.event_name == 'pull_request'
+      || github.event_name == 'issues'
+      || github.event_name == 'issue_comment'
+      || github.event_name == 'pull_request_review'
+      || github.event_name == 'pull_request_review_comment'
     concurrency:
-      # Keyed on the specific PR / comment / issue rather than github.ref, because
-      # issue events all report the default branch and a ref-keyed group would let
-      # two comments cancel each other, leaving one unscanned.
-      #
-      # cancel-in-progress is deliberately FALSE. Every version of a body deserves a
-      # verdict, the job is seconds long, and a cancelled check-run lingers on the
-      # commit and makes an otherwise-green PR look broken.
-      group: public-repo-guard-body-${{ github.event.pull_request.number || github.event.comment.id || github.event.issue.number || github.ref }}
+      # Keyed on the RUN, i.e. deliberately never shared. GitHub keeps at most ONE
+      # pending run per group, so any shared key lets a burst of edits supersede a
+      # queued intermediate version — that version would never get a verdict, and
+      # every version of a public body deserves one. The job is seconds long, so
+      # nothing is deduplicated or cancelled here; this stanza survives only to
+      # document the decision against a future "optimization" back to a shared group.
+      group: public-repo-guard-body-${{ github.run_id }}
       cancel-in-progress: false
     runs-on: ubuntu-latest
     steps:
@@ -153,10 +165,21 @@ jobs:
           # On a comment event the payload also carries the parent issue/PR title
           # and body. Re-scanning those here would make ONE bad issue body fail
           # every future comment on the thread, however clean — so a comment run
-          # scans only the comment. The parent body already got its own verdict
-          # from the issues/pull_request opened+edited runs.
+          # scans only the comment (this covers issue_comment AND diff review
+          # comments: pull_request_review_comment payloads carry `comment` too).
+          # The parent body already got its own verdict from the issues/
+          # pull_request opened+edited runs.
           if [ "$(jq -r 'has("comment")' "$GITHUB_EVENT_PATH")" = "true" ]; then
             jq -r '.comment.body // empty' \
+              "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/bodyscan/body.txt"
+          # A review SUBMISSION scans only the review body (often empty for a bare
+          # approve — an empty scan is a pass, not an error). Its inline diff
+          # comments each arrive as their own pull_request_review_comment event.
+          # This branch must come before the pull_request fallback: the review
+          # payload carries `pull_request` too, and falling through would re-scan
+          # the PR body under the review's check name instead of the review.
+          elif [ "$(jq -r 'has("review")' "$GITHUB_EVENT_PATH")" = "true" ]; then
+            jq -r '.review.body // empty' \
               "$GITHUB_EVENT_PATH" > "$RUNNER_TEMP/bodyscan/body.txt"
           else
             jq -r '[.pull_request.title, .pull_request.body,
