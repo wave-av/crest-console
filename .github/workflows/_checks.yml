@@ -26,7 +26,7 @@ permissions:
 
 jobs:
   checks:
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -144,7 +144,7 @@ jobs:
     # the DIFF (it grandfathers legacy debt). No-op in a repo with no tracked `.claude/`. Inlined so
     # consumers need nothing from this repo — mirrors wave-foundation/scripts/check-claude-config.sh; keep
     # the two in sync.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -175,7 +175,7 @@ jobs:
     # Validates SKILL.md frontmatter in the CALLING repo. Auto-discovers any *SKILL.md; no-op if
     # the repo has none. Inlined (not a shared script) so consumers need nothing from this repo —
     # mirrors wave-foundation/scripts/validate-skills.py; keep the two in sync.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -240,7 +240,7 @@ jobs:
     # commit time. No-op (not a failure) if the repo hasn't vendored it yet. BLOCKING as of 2026-06-04 —
     # flipped from advisory after a clean soak (all 18 active spokes green on this gate). A repo that
     # hasn't vendored the linter still no-ops; one that vendored it must keep a valid Opus-4.x request shape.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -266,7 +266,7 @@ jobs:
     # .foundation/frameworks/claude-api/lint-cache-control.sh — the same script devs hit at commit time.
     # No-op if not vendored yet. BLOCKING as of 2026-06-04 — flipped from advisory after a clean soak
     # (all 18 active spokes green). Every vendored Claude request with a system prefix must cache it.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -288,7 +288,7 @@ jobs:
     # banned patterns: *-edge.wave.online, *.production.wave.online, wave-*.wave.online,
     # *-staging.wave.online (use sub-subdomain instead). Worker-only fallbacks (*.workers.dev) are
     # ALLOWED with a warning so dev/preview routes don't trip the gate.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -343,7 +343,7 @@ jobs:
     # an approval STEP, like "human review"; covers the "no human in the loop" autonomy idiom too); the GDPR
     # / EU-AI-Act legal terms "human review"/"human oversight"; "human-readable"; typography words;
     # identifiers/const/id-slugs; and code comments. No `${{ github.* }}` interpolation (shell only).
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
@@ -386,7 +386,7 @@ jobs:
     # so it can't disagree with the contract. No-op for repos without a billing.config.yaml. Advisory on
     # rollout (continue-on-error) so a new gate can't break every spoke at once; harden to blocking after soak.
     # The commit-time twin (registry gate) is the documented follow-up in frameworks/gates/registry.yaml.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     continue-on-error: true
     steps:
@@ -413,7 +413,7 @@ jobs:
     # (kills the storage_gb-vs-wave_storage_gb / voice_minutes-vs-voice_synthesis_minutes drift class).
     # Schema-driven (reads the enums, never hardcodes the list). Advisory on rollout (continue-on-error) so a
     # new gate can't break every spoke at once; harden to blocking after soak.
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     continue-on-error: true
     steps:
@@ -445,7 +445,7 @@ jobs:
   # check into a required check only on spokes whose graph is on and signal is clean.
   dependency-review:
     if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
+    runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 10
     continue-on-error: true
     steps:
