@@ -27,4 +27,4 @@ client is free and open (Apache-2.0); the network is the product.
 
 ## License
 
-Apache-2.0 © WAVE Online LLC. See [LICENSE](./LICENSE).
+Apache-2.0 © WAVE Online, LLC. See [LICENSE](./LICENSE).
