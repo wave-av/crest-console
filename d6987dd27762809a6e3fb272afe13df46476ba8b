@@ -1,0 +1,19 @@
+.github/CODEOWNERS
+  s_16757f43c0f9c5::t_33ddb80f7652f3 1-14
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.6.23",
+  "base_commit_sha": "d6987dd27762809a6e3fb272afe13df46476ba8b",
+  "prompts": {},
+  "sessions": {
+    "s_16757f43c0f9c5": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a74de28c390714259",
+        "model": "unknown"
+      },
+      "human_author": "Jake Fineman <jakefineman@gmail.com>"
+    }
+  }
+}
