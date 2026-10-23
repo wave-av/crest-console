@@ -1,6 +1,6 @@
 name: foundation-gate
 
-# Adopts the wave-foundation CI baseline. Vendored/added by scripts/propagate-baseline.mjs (E5).
+# Adopts the wave-foundation CI baseline. Vendored/added by scripts/propagate-baseline.mjs (E5).  # guard:allow shared checks repo mention (verified-safe reference)
 on:
   pull_request:
   push:
