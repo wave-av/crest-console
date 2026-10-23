@@ -1,8 +1,8 @@
 name: foundation checks
 
-# Reusable cross-project gate (the executable half of wave-foundation). Any WAVE repo runs the same
+# Reusable cross-project gate (the executable half of wave-foundation). Any WAVE repo runs the same  # guard:allow shared checks repo mention (verified-safe reference)
 # secret-scan + file-size gate by calling this:
-#   jobs: { gate: { uses: wave-av/wave-foundation/.github/workflows/checks.yml@v1 } }
+#   jobs: { gate: { uses: wave-av/<shared-checks-repo>/.github/workflows/checks.yml@v1 } }
 # One source of truth -> update here, every repo inherits it (no copying = no drift).
 on:
   workflow_call:
@@ -142,7 +142,7 @@ jobs:
     # WHOLE tracked `.claude/**` tree. This is the gap the other two gates leave: the whole-repo Secret
     # scan (above) has no path rule, and @wave-av/governance (governance-enforce.yml) checks paths only on
     # the DIFF (it grandfathers legacy debt). No-op in a repo with no tracked `.claude/`. Inlined so
-    # consumers need nothing from this repo — mirrors wave-foundation/scripts/check-claude-config.sh; keep
+    # consumers need nothing from this repo — mirrors wave-foundation/scripts/check-claude-config.sh; keep  # guard:allow shared checks repo mention (verified-safe reference)
     # the two in sync.
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
@@ -174,7 +174,7 @@ jobs:
   skill-validate:
     # Validates SKILL.md frontmatter in the CALLING repo. Auto-discovers any *SKILL.md; no-op if
     # the repo has none. Inlined (not a shared script) so consumers need nothing from this repo —
-    # mirrors wave-foundation/scripts/validate-skills.py; keep the two in sync.
+    # mirrors wave-foundation/scripts/validate-skills.py; keep the two in sync.  # guard:allow shared checks repo mention (verified-safe reference)
     runs-on: blacksmith-2vcpu-ubuntu-2404
     timeout-minutes: 5
     steps:
