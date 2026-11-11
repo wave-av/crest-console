@@ -57,6 +57,7 @@ cat >"$STEPS" <<'EOF'
   {"key": "foundation-file-size", "queue": "fpc-isolated", "command": ".buildkite/scripts/foundation-file-size.sh", "exit": 0},
   {"key": "foundation-skill-validate", "queue": "fpc-isolated", "command": ".buildkite/scripts/foundation-skill-validate.sh", "exit": 0},
   {"key": "foundation-verify-routes", "queue": "fpc-isolated", "command": ".buildkite/scripts/foundation-verify-routes.sh", "exit": 0},
+  {"key": "leak-gate-regression", "queue": "fpc-isolated", "command": ".buildkite/scripts/leak-gate-regression.sh", "exit": 0},
   {"key": "provenance-emit", "queue": "fpc-isolated", "command": ".buildkite/scripts/provenance-emit.sh", "exit": 0}
 ]
 EOF

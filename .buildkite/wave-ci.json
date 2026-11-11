@@ -32,6 +32,12 @@
       "timeout": 5
     },
     {
+      "key": "leak-gate-regression",
+      "label": ":test_tube: leak-gate regression",
+      "script": ".buildkite/scripts/leak-gate-regression.sh",
+      "timeout": 5
+    },
+    {
       "key": "provenance-emit",
       "label": ":scroll: provenance emit (O1)",
       "script": ".buildkite/scripts/provenance-emit.sh",
@@ -42,7 +48,8 @@
         "foundation-secret-scan",
         "foundation-file-size",
         "foundation-skill-validate",
-        "foundation-verify-routes"
+        "foundation-verify-routes",
+        "leak-gate-regression"
       ]
     }
   ]
